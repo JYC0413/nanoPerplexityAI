@@ -1,13 +1,13 @@
 import os
 import re
+import requests
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-from googlesearch import search
-import requests
 from bs4 import BeautifulSoup
-from openai import OpenAI
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from googlesearch import search
+from llama_index.core.llms import ChatMessage
+from llama_index.llms.openai_like import OpenAILike
 
 # -----------------------------------------------------------------------------
 # Default configuration
@@ -15,28 +15,42 @@ NUM_SEARCH = 10  # Number of links to parse from Google
 SEARCH_TIME_LIMIT = 3  # Max seconds to request website sources before skipping to the next URL
 TOTAL_TIMEOUT = 6  # Overall timeout for all operations
 MAX_CONTENT = 500  # Number of words to add to LLM context for each search result
-LLM_MODEL = 'gpt-4o-mini' #'gpt-3.5-turbo' #'gpt-4o'
-MAX_TOKENS = 1000 # Maximum number of tokens LLM generates
+MAX_TOKENS = 1000  # Maximum number of tokens LLM generates
 # -----------------------------------------------------------------------------
 
 # Set up OpenAI API key
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL')
+LLM_MODEL = os.getenv('LLM_MODEL')
 if OPENAI_API_KEY is None:
     raise ValueError("OpenAI API key is not set. Please set the OPENAI_API_KEY environment variable.")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+if LLM_MODEL is None:
+    raise ValueError("LLM model is not set. Please set the LLM_MODEL environment variable.")
+
+if OPENAI_BASE_URL is None:
+    OPENAI_BASE_URL = "http://127.0.0.1:8080/v1"
+    print(
+        "OPENAI_BASE_URL defaults to `http://127.0.0.1:8080/v1`. Or you can set the OPENAI_BASE_URL environment variable.")
+
+client = OpenAILike(model=LLM_MODEL, api_base=OPENAI_BASE_URL, api_key=OPENAI_API_KEY)
+
 
 def get_query():
     """Prompt the user to enter a query."""
     return input("Enter your query: ")
 
+
 def trace_function_factory(start):
     """Create a trace function to timeout request"""
+
     def trace_function(frame, event, arg):
         if time.time() - start > TOTAL_TIMEOUT:
             raise TimeoutError('Website fetching timed out')
         return trace_function
+
     return trace_function
+
 
 def fetch_webpage(url, timeout):
     """Fetch the content of a webpage given a URL and a timeout."""
@@ -56,16 +70,20 @@ def fetch_webpage(url, timeout):
         sys.settrace(None)
     return url, None
 
+
 def google_parse_webpages(query, num_search=NUM_SEARCH, search_time_limit=SEARCH_TIME_LIMIT):
     """Perform a Google search and parse the content of the top results."""
     urls = search(query, num_results=num_search)
     max_workers = os.cpu_count() or 1  # Fallback to 1 if os.cpu_count() returns None
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {executor.submit(fetch_webpage, url, search_time_limit): url for url in urls}
-        return {url: page_text for future in as_completed(future_to_url) if (url := future.result()[0]) and (page_text := future.result()[1])}
+        return {url: page_text for future in as_completed(future_to_url) if
+                (url := future.result()[0]) and (page_text := future.result()[1])}
+
 
 def llm_check_search(query):
     """Check if query requires search and execute Google search."""
+    print(f"query: {query}")
     system_message = """
     You are a helpful assistant whose primary goal is to decide if a user's query requires a Google search. You should use Google search for most queries to find the most accurate and updated information. Follow these conditions:
 
@@ -73,7 +91,7 @@ def llm_check_search(query):
     - If the query requires Google search, you must respond with a reformulated user query for Google search.
     """
     prompt = [{"role": "system", "content": system_message}, {"role": "user", "content": query}]
-    response = llm_openai(prompt, max_tokens=20)
+    response = llm_openai(prompt)
     if response.lower().strip() != "no":
         print(f"Performing Google search: {response}")
         search_dic = google_parse_webpages(response)
@@ -81,12 +99,14 @@ def llm_check_search(query):
     else:
         print("No Google search required.")
         return None
-    
+
+
 def build_prompt(query, search_dic, max_content=MAX_CONTENT):
     """Build the prompt for the language model including the search results context."""
     context_block = ""
     if search_dic:
-        context_list = [f"[{i+1}]({url}): {content[:max_content]}" for i, (url, content) in enumerate(search_dic.items())]
+        context_list = [f"[{i + 1}]({url}): {content[:max_content]}" for i, (url, content) in
+                        enumerate(search_dic.items())]
         context_block = "\n".join(context_list)
 
     system_message = f"""
@@ -104,14 +124,15 @@ def build_prompt(query, search_dic, max_content=MAX_CONTENT):
     """
     return [{"role": "system", "content": system_message}, {"role": "user", "content": query}]
 
-def llm_openai(prompt, llm_model=LLM_MODEL, max_tokens=MAX_TOKENS):
+
+def llm_openai(prompt):
     """Generate a response using the OpenAI language model."""
-    response = client.chat.completions.create(
-        model=llm_model,
-        messages=prompt,
-        max_tokens=max_tokens
-    )
-    return response.choices[0].message.content
+    response = client.chat(messages=[ChatMessage(content=prompt)])
+    print(f"response:{response}")
+    print(f"message:{response.message}")
+    print(f"content:{response.message.content}")
+    return response.message.content
+
 
 def renumber_citations(response):
     """Renumber citations in the response to be sequential."""
@@ -121,10 +142,12 @@ def renumber_citations(response):
         response = re.sub(rf'\[\(?{old}\)?\]', f'[{new}]', response)
     return response, citation_map
 
+
 def generate_citation_links(citation_map, search_dic):
     """Generate citation links based on the renumbered response."""
-    cited_links = [f"{new}. {list(search_dic.keys())[old-1]}" for old, new in citation_map.items()]
+    cited_links = [f"{new}. {list(search_dic.keys())[old - 1]}" for old, new in citation_map.items()]
     return "\n".join(cited_links)
+
 
 def save_markdown(query, response, search_dic):
     """Renumber citations, then save the query, response, and sources to a markdown file."""
@@ -135,6 +158,7 @@ def save_markdown(query, response, search_dic):
     with open(f"{query}.md", "w") as file:
         file.write(output_content)
 
+
 def main():
     """Main function to execute the search, generate response, and save to markdown."""
     query = get_query()
@@ -142,6 +166,7 @@ def main():
     prompt = build_prompt(query, search_dic)
     response = llm_openai(prompt)
     save_markdown(query, response, search_dic)
+
 
 if __name__ == "__main__":
     main()
