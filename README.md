@@ -1,39 +1,44 @@
-# nanoPerplexityAI
-![meme](/assets/meme.png)
+# nanoPerplexityAI with LlamaEdge
 
-The simplest and most intuitive open-source implementation of an open source [perplexity.ai](https://www.perplexity.ai/), a large language model(LLM) service which cites information from Google. No fancy GUI or LLM agents are involved, just **100 lines of python code** (slightly more with updated code 🙇). Please check out [this video](https://youtu.be/8zBDTnSYSoc) for more explanations!
+## Description
+This project extends nanoPerplexityAI to support LlamaEdge by integrating specific environment variables and dependencies.
 
-## Architecture
+## Setup Instructions
 
-1. Get the user query
-2. LLM checks the user query, decides whether to execute a Google search, and if searching, reformulates the user query into a Google-suited query to find relevant webpage URLs and fetch texts. (In practice, [PerplexityAI searches its already indexed sources](https://www.perplexity.ai/hub/faq/how-does-perplexity-work))
-3. Build a prompt using `system prompt + webpage context + user query`
-4. Call the LLM API to generate an answer
-5. Format citations and save the LLM answer into a markdown file for visualization
+### Environment Variables
+Before running the project, you need to set up three environment variables:
+- `OPENAI_BASE_URL`: Set this to `https://llama.us.gaianet.network/v1`
+- `LLM_MODEL`: Set this to `llama`
+- `OPENAI_API_KEY`: Set this to `LLAMAEDGE`
 
-## Install
+#### Windows
+Open Command Prompt and execute:
+```cmd
+set OPENAI_BASE_URL=https://llama.us.gaianet.network/v1
+set LLM_MODEL=llama
+set OPENAI_API_KEY=LLAMAEDGE
 ```
-pip install googlesearch-python requests beautifulsoup4 lxml openai 
+```powershell
+$env:OPENAI_BASE_URL=https://llama.us.gaianet.network/v1
+$env:LLM_MODEL=llama
+$env:OPENAI_API_KEY=LLAMAEDGE
+```
+#### Mac/Linux
+Open Terminal and execute:
+```bash
+export OPENAI_BASE_URL=https://llama.us.gaianet.network/v1
+export LLM_MODEL=llama
+export OPENAI_API_KEY=LLAMAEDGE
 ```
 
-## Quick Start
+### Dependencies
+Before running the script, install the required dependencies:
+```bash
+pip install googlesearch-python requests beautifulsoup4 lxml lama_index
 ```
-export OPENAI_API_KEY=<Your OpenAI API KEY>
+
+## Running the Script
+Once the environment variables are set and dependencies installed, you can run the script:
+```bash
 python nanoPerplexityAI.py
 ```
-
-The script will prompt you to type your question, then it will generate an answer in `<query>.md`
-
-## View the Answers from nanoPerplexityAI:
-There are several ways to visualize the answers easily:
-- Open in your editor, e.g., VScode
-- Open in [Markdown Playground](https://dotmd-editor.vercel.app/)
-- Push them to your github repo
-
-Check out the [answers](/example_outputs/) nanoPerplexityAI has already generated 
-
-![answers](/assets/example_response.png)
-
-
-## Acknowledgements
-Thank you [perplexity.ai](https://www.perplexity.ai/) for the amazing idea and [clarity-ai](https://github.com/mckaywrigley/clarity-ai) and [Perplexica](https://github.com/ItzCrazyKns/Perplexica) for coding inspirations on the open-source implementation of perplexity.ai. 
